@@ -50,7 +50,7 @@ def diamond():
     while True:
         for color in colors:
             for line in range(height):
-                print(f'{' ' * offset}\u001b[48;5;{color}m{' ' * lenght}{RESET}')
+                print(f"{' ' * offset}\u001b[48;5;{color}m{' ' * lenght}{RESET}")
                 if line < center:
                     offset -= step
                     lenght += step * 2
@@ -75,13 +75,13 @@ def sequence():
             evens.append(float(line))
     file.close()
     # print(len(odds), len(evens))
-    print(f'{BLUE}{' ' * int(len(odds) / 5)}{RESET} {len(odds)/(len(odds) + len(evens)) * 100}%')
-    print(f'{RED}{' ' * int(len(evens) / 5)}{RESET} {len(evens)/(len(odds) + len(evens)) * 100}%')
+    print(f"{BLUE}{' ' * int(len(odds) / 5)}{RESET} {len(odds)/(len(odds) + len(evens)) * 100}%")
+    print(f"{RED}{' ' * int(len(evens) / 5)}{RESET} {len(evens)/(len(odds) + len(evens)) * 100}%")
 
 
-#flag()
-#loading()
+flag()
+loading()
 #m = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-#multiple_progressbar(m)
-# diamond()
+# multiple_progressbar(m)
+diamond()
 sequence()

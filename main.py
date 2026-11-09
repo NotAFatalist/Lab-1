@@ -10,64 +10,65 @@
 Запуск:  python main.py [flag|pattern|anim|diagram|graph|all]
          python main.py            # то же, что all
 
-Все изображения строятся в двумерном буфере и выводятся escape-последовательностями
-(цвет фона, управление курсором), а не "вручную" подобранными строками.
+Идея решения: каждое изображение сначала собирается в двумерный "пиксельный"
+буфер (список списков), а затем выводится в консоль escape-последовательностями.
+Так рисунок действительно генерируется кодом, а не печатается готовыми строками.
 """
 
 from __future__ import annotations
 
-import os
-import sys
-import time
-from pathlib import Path
+import os          # os.system("cls"/"clear") — очистка консоли
+import sys         # sys.argv (режим запуска) и sys.stdout (кодировка)
+import time        # time.sleep — пауза между кадрами анимации
+from pathlib import Path   # удобный путь к sequence.txt рядом со скриптом
 
 # --- escape-последовательности -------------------------------------------------
-RESET = "\033[0m"
-RED_BG = "\033[38;5;160;48;5;160m"     # швейцарский красный
+RESET = "\033[0m"                      # сброс цвета и стиля
+RED_BG = "\033[38;5;160;48;5;160m"     # швейцарский красный (цвет символа и фона)
 WHITE_BG = "\033[38;5;231;48;5;231m"   # белый
-BLACK_BG = "\033[38;5;16;48;5;16m"     # чёрный (узор)
-GREY_BG = "\033[48;5;245m"             # серый фон для диаграммы
-RED = "\033[38;5;160m"
+BLACK_BG = "\033[38;5;16;48;5;16m"     # чёрный (кольца узора)
+GREY_BG = "\033[48;5;245m"             # серый фон (резерв)
+RED = "\033[38;5;160m"                 # только цвет символа — для полос диаграммы
 WHITE = "\033[38;5;231m"
 
-CURSOR_HOME = "\033[H"        # курсор в левый верхний угол
-CLEAR_LINE = "\033[K"         # стереть строку до конца
+CURSOR_HOME = "\033[H"        # курсор в левый верхний угол экрана
+CLEAR_LINE = "\033[K"         # стереть строку от курсора до конца
 CLEAR_SCREEN = "\033[2J"      # стереть весь экран
 
-CELL = "██"                   # "пиксель" консоли
+CELL = "██"                   # "пиксель" консоли: один символ занимает 2 знака
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent   # папка, где лежит этот файл
 
 
 # --- служебное -----------------------------------------------------------------
 def enable_ansi() -> None:
     """Включает обработку ANSI-последовательностей в консоли Windows."""
-    if os.name != "nt":
+    if os.name != "nt":              # на Linux/macOS VT уже работает — выходим
         return
     try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
-        mode = ctypes.c_uint32()
-        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        import ctypes                # ctypes даёт доступ к WinAPI
+        kernel32 = ctypes.windll.kernel32            # библиотека ядра Windows
+        handle = kernel32.GetStdHandle(-11)          # STD_OUTPUT_HANDLE — наша консоль
+        mode = ctypes.c_uint32()                     # сюда GetConsoleMode запишет режим
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):   # прочитали режим
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # включили VT-обработку
     except Exception:
-        pass
+        pass                          # в старых консолях просто не будет цвета
 
-    try:  # чтобы русский текст не падал при перенаправлении вывода в файл
+    try:                              # чтобы русский текст не падал при выводе в файл
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
 
 def clear_console() -> None:
-    """Очистка консоли: os.system(cls/clear) + сброс курсора."""
-    os.system("cls" if os.name == "nt" else "clear")
-    print(CURSOR_HOME, end="")
+    """Очистка консоли: os.system(cls/clear) + сброс курсора в начало."""
+    os.system("cls" if os.name == "nt" else "clear")   # системная команда очистки
+    print(CURSOR_HOME, end="")                          # курсор в левый верхний угол
 
 
 def pause(seconds: float) -> None:
+    """Короткая пауза — чтобы кадры анимации не мелькали слишком быстро."""
     time.sleep(seconds)
 
 
@@ -75,74 +76,104 @@ def pause(seconds: float) -> None:
 def swiss_flag_grid(size: int = 16, thickness: int = 4, arm: int = 10) -> list[list[str]]:
     """Строит матрицу флага: 'R' — красный фон, 'W' — белый (крест).
 
-    Флаг Швейцарии — квадрат с белым крестом, у которого лучи одинаковой длины.
+    Флаг Швейцарии — квадрат с белым крестом, у которого все лучи одинаковой длины.
     """
-    grid = [["R"] * size for _ in range(size)]
-    center = size // 2
-    half = thickness // 2
-    start = center - arm // 2
+    grid = [["R"] * size for _ in range(size)]   # квадрат, полностью красный
+    center = size // 2                           # середина флага (столбец и строка)
+    half = thickness // 2                        # половина толщины луча
+    start = center - arm // 2                    # отступ от края до начала луча
 
-    for row in range(start, start + arm):          # вертикальный луч
+    # вертикальный луч: идём по строкам, красим центральные столбцы в белый
+    for row in range(start, start + arm):
         for col in range(center - half, center - half + thickness):
             grid[row][col] = "W"
 
-    for row in range(center - half, center - half + thickness):  # горизонтальный луч
+    # горизонтальный луч: идём по строкам, но красим уже диапазон столбцов
+    for row in range(center - half, center - half + thickness):
         for col in range(start, start + arm):
             grid[row][col] = "W"
 
-    return grid
+    return grid                                  # готовая матрица 16x16
 
 
 def render_grid(grid: list[list[str]], palette: dict[str, str]) -> None:
     """Выводит матрицу в консоль, закрашивая ячейки фоном из palette."""
-    for row in grid:
-        line = "".join(palette.get(cell, "") + CELL for cell in row)
-        print(line + RESET)
+    for row in grid:                                    # проходим по строкам
+        line = "".join(palette.get(cell, "") + CELL for cell in row)  # каждая ячейка — 2 знака
+        print(line + RESET)                             # сбрасываем цвет в конце строки
 
 
 def flag() -> None:
     """Пункт 1: флаг Швейцарии."""
     print("Флаг Швейцарии (вариант 10)")
     print()
-    render_grid(swiss_flag_grid(), {"R": RED_BG, "W": WHITE_BG})
+    render_grid(swiss_flag_grid(), {"R": RED_BG, "W": WHITE_BG})   # красный + белый крест
     print()
 
 
 # --- 2. узор «j» ---------------------------------------------------------------
-def ring_tile(height: int = 7, hole: float = 1.6) -> list[list[str]]:
-    """Один элемент узора «j»: два кольца, касающихся друг друга.
+def ring_pattern_grid(radius_px: int = 112, hole_px: int = 64, gap_px: int = 6,
+                      gamma: float = 0.85) -> list[list[int]]:
+    """Строит узор «j»: два крупных круглых кольца, стоящих рядом, почти вплотную.
 
-    Каждая ячейка — точка с координатами центра; кольцо — множество точек,
-    расстояние от которых до центра одного из кругов лежит в (hole, radius).
+    Возвращает сетку, где каждая ячейка — номер серого цвета ANSI (231 — белый,
+    232…255 — от почти чёрного к светлому). Чёткость достигается тремя приёмами:
+      * большой размер — кольцо занимает 28 символов в диаметре, поэтому силуэт
+        почти идеально круглый;
+      * сглаживание — символ консоли ≈ 8×16 пикселей, каждая ячейка разбивается
+        на субпиксели 8×16 (ровно по 1 px), и по доле субпикселей, попавших
+        в кольцо, выбирается один из 24 оттенков серого;
+      * gamma < 1 — краевая полоса полутонов сжимается, контур становится резче.
     """
-    radius = height / 2
-    width = 2 * height
-    centers = (
-        (radius, radius),
-        (radius + width / 2, radius),
-    )
+    margin_px = 10                        # белое поле вокруг колец (минимум)
+    total_px = 4 * radius_px + gap_px     # ширина пары колец вместе с зазором
+    width = (total_px + 2 * margin_px + 7) // 8    # ширина сетки в символах
+    height = (2 * radius_px + 2 * margin_px + 15) // 16  # и высота
+    offset_x = (width * 8 - total_px) / 2   # ровные поля слева и справа
+    offset_y = (height * 16 - 2 * radius_px) / 2  # и сверху/снизу
 
-    tile = []
-    for row in range(height):
+    center_y = offset_y + radius_px         # центр обоих колец по вертикали
+    center_x1 = offset_x + radius_px        # центр левого кольца
+    center_x2 = offset_x + 3 * radius_px + gap_px   # центр правого кольца
+
+    sub_x, sub_y = 8, 16                    # субпикселей на символ (8×16 px)
+    rows = []
+    for row in range(height):               # проходим по строкам сетки
         line = []
-        for col in range(width):
-            px, py = col + 0.5, row + 0.5
-            distance = min(((px - cx) ** 2 + (py - cy) ** 2) ** 0.5 for cx, cy in centers)
-            line.append("#" if hole <= distance <= radius else ".")
-        tile.append(line)
-    return tile
+        for col in range(width):            # и по столбцам
+            inside = 0                      # сколько субпикселей попало в кольцо
+            for sub_col in range(sub_x):    # субпиксели по горизонтали
+                for sub_row in range(sub_y):   # и по вертикали (квадратные 1×1 px)
+                    x = col * 8 + (sub_col + 0.5) * 8 / sub_x   # координаты в пикселях
+                    y = row * 16 + (sub_row + 0.5) * 16 / sub_y
+                    distance = min(         # расстояние до ближайшего центра
+                        ((x - center_x1) ** 2 + (y - center_y) ** 2) ** 0.5,
+                        ((x - center_x2) ** 2 + (y - center_y) ** 2) ** 0.5,
+                    )
+                    if hole_px <= distance <= radius_px:    # попали в кольцо
+                        inside += 1
+            fraction = inside / (sub_x * sub_y)     # доля клетки, занятая кольцом
+            level = round(fraction ** gamma * 24)   # гамма-кривая делает контур резче
+            line.append(231 if level == 0 else 232 + (24 - level))  # 231 — белый
+        rows.append(line)
+    return rows
 
 
-def pattern(tile_cols: int = 2, tile_rows: int = 2) -> None:
-    """Пункт 2: повторяющийся узор «j»."""
-    tile = ring_tile()
-    palette = {"#": BLACK_BG, ".": WHITE_BG}
+def pattern(repeats: int = 1) -> None:
+    """Пункт 2: узор «j» — два круглых кольца, стоящих рядом, почти вплотную.
 
+    По умолчанию печатается сам элемент узора (два кольца); pattern(3) выведет
+    его три раза подряд по вертикали через пустую строку.
+    """
+    grid = ring_pattern_grid()              # сетка оттенков серого
     print("Узор «j» (вариант 10)")
     print()
-    for _ in range(tile_rows):
-        for row in tile:
-            print("".join(palette[cell] + CELL for cell in row) * tile_cols + RESET)
+    for index in range(repeats):            # сколько раз показать узор
+        for row in grid:                    # каждая строка сетки
+            # одна ячейка = один символ «█» с фоном и текстом одного оттенка
+            print("".join(f"\033[38;5;{grey};48;5;{grey}m█" for grey in row) + RESET)
+        if index < repeats - 1:             # пустой ряд между повторами
+            print("\033[48;5;231m" + " " * len(grid[0]) + RESET)
     print()
 
 
@@ -153,38 +184,42 @@ def animation(frames: int = 4, loops: int = 3, delay: float = 0.35) -> None:
     Кадр перерисовывается на месте: курсор возвращается в начало экрана,
     каждая строка перед выводом очищается (CLEAR_LINE).
     """
-    thickness = (2, 4, 6, 4)          # толщина креста в кадрах
-    arms = (8, 10, 12, 10)            # длина лучей в кадрах
-    height = 16
+    thickness = (2, 4, 6, 4)          # толщина креста в каждом кадре
+    arms = (8, 10, 12, 10)            # длина лучей в каждом кадре
+    height = 16                       # высота флага
 
-    clear_console()
-    for _ in range(loops):
-        for index in range(min(frames, len(thickness))):
-            grid = swiss_flag_grid(size=height, thickness=thickness[index], arm=arms[index])
-            print(CURSOR_HOME, end="")
-            for row in grid:
+    clear_console()                   # начинаем с чистого экрана
+    for _ in range(loops):            # несколько проходов, чтобы анимация была видна
+        for index in range(min(frames, len(thickness))):     # перебираем кадры
+            grid = swiss_flag_grid(                          # строим флаг под кадр
+                size=height, thickness=thickness[index], arm=arms[index]
+            )
+            print(CURSOR_HOME, end="")                       # курсор в начало экрана
+            for row in grid:                                 # перерисовываем строки
                 line = "".join(
                     (RED_BG if cell == "R" else WHITE_BG) + CELL for cell in row
                 )
-                print(line + RESET + CLEAR_LINE)
-            print(CLEAR_LINE + f"Кадр {index + 1}/{frames}   {RESET}", end="", flush=True)
-            pause(delay)
+                print(line + RESET + CLEAR_LINE)             # CLEAR_LINE убирает хвост
+            print(CLEAR_LINE + f"Кадр {index + 1}/{frames}   {RESET}",
+                  end="", flush=True)                        # подпись кадра
+            pause(delay)                                     # ждём перед следующим кадром
 
-    print(CURSOR_HOME, end="")
-    for row in swiss_flag_grid(height):
-        print("".join((RED_BG if c == "R" else WHITE_BG) + CELL for c in row) + RESET + CLEAR_LINE)
+    print(CURSOR_HOME, end="")                               # оставляем финальный кадр
+    for row in swiss_flag_grid(height):                      # рисуем флаг целиком
+        print("".join((RED_BG if c == "R" else WHITE_BG) + CELL for c in row)
+              + RESET + CLEAR_LINE)
     print(CLEAR_LINE + "Готово." + RESET)
 
 
 # --- 4. диаграмма --------------------------------------------------------------
 def read_sequence(path: Path | None = None) -> list[float]:
     """Читает числовую последовательность из sequence.txt."""
-    path = path or HERE / "sequence.txt"
+    path = path or HERE / "sequence.txt"           # файл рядом со скриптом
     numbers = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        raw = raw.strip().replace(",", ".")
-        if raw:
-            numbers.append(float(raw))
+    for raw in path.read_text(encoding="utf-8").splitlines():   # по одной строке
+        raw = raw.strip().replace(",", ".")        # нормализуем запятую в точку
+        if raw:                                    # пропускаем пустые строки
+            numbers.append(float(raw))             # строка -> число
     return numbers
 
 
@@ -193,22 +228,23 @@ def diagram(numbers: list[float] | None = None, width: int = 50) -> None:
 
     Вариант 10: числа от -3 до 3 и остальные (сумма двух групп = 100 %).
     """
-    numbers = numbers if numbers is not None else read_sequence()
-    inside = [x for x in numbers if -3.0 <= x <= 3.0]
-    outside = [x for x in numbers if not (-3.0 <= x <= 3.0)]
-    total = len(numbers)
+    numbers = numbers if numbers is not None else read_sequence()   # читаем данные
+    inside = [x for x in numbers if -3.0 <= x <= 3.0]               # попали в диапазон
+    outside = [x for x in numbers if not (-3.0 <= x <= 3.0)]        # не попали
+    total = len(numbers)                                            # всего чисел
 
     print("Диаграмма числовой последовательности (вариант 10)")
     print(f"Файл: sequence.txt, всего чисел: {total}")
     print()
 
+    # по очереди выводим две группы: подпись, количество, полоса, процент
     for label, group, color in (
         ("Числа от -3 до 3", inside, RED),
         ("Остальные числа ", outside, WHITE),
     ):
-        percent = len(group) / total * 100 if total else 0.0
-        length = max(1, round(percent / 100 * width)) if group else 0   # ширина бара
-        bar = "█" * length
+        percent = len(group) / total * 100 if total else 0.0    # доля группы
+        length = max(1, round(percent / 100 * width)) if group else 0   # ширина полосы
+        bar = "█" * length                                      # сама полоса
         print(f"{label}: {len(group):3d} шт. {color}{bar}{RESET} {percent:5.1f} %")
 
     print()
@@ -216,54 +252,51 @@ def diagram(numbers: list[float] | None = None, width: int = 50) -> None:
 
 
 # --- 5. допзадание: график y = x / 3 ------------------------------------------
-def build_plot(rows: int = 9, cols: int = 41, x_max: float = 9.0) -> list[list[str]]:
+def build_plot(rows: int = 10, x_max: float = 9.0) -> list[list[str]]:
     """Строит в двумерном буфере первую четверть графика y = x / 3.
 
-    rows >= 9 — по требованию задания; буфер заполняется точками кривой,
-    оси рисуются отдельно, поэтому график именно генерируется, а не печатается.
+    Каждая точка функции — это ровно одна звёздочка: на каждый целый x = 0..9
+    вычисляется y = x / 3, координаты переводятся в строку и столбец сетки,
+    и в эту клетку ставится «*». В результате получается линия из точек,
+    а не залитые ступеньки.
     """
-    y_max = x_max / 3
-    buffer = [[" "] * cols for _ in range(rows)]
+    points = int(x_max) + 1              # количество точек: x = 0, 1, ..., 9
+    y_max = x_max / 3                    # максимум функции на отрезке (y(9) = 3)
+    grid = [[" "] * points for _ in range(rows)]   # пустое поле rows x points
 
-    for row in range(rows):                     # ось Y
-        buffer[row][0] = "|"
-    for col in range(cols):                     # ось X
-        buffer[rows - 1][col] = "-"
-    buffer[rows - 1][0] = "+"
+    for x in range(points):              # по одной точке на каждый целый x
+        y = x / 3                        # значение функции в этой точке
+        row = round((1 - y / y_max) * (rows - 1))   # высота -> номер строки (0 — верх)
+        grid[row][x] = "*"               # одна звёздочка = одна точка графика
 
-    steps = 4 * cols
-    for step in range(steps + 1):
-        x = x_max * step / steps
-        y = x / 3
-        col = round(x / x_max * (cols - 1))
-        row = round((1 - y / y_max) * (rows - 1))
-        if row == rows - 1 and col == 0:        # начало координат не затираем
-            continue
-        buffer[row][col] = "*"
-
-    return buffer
+    return grid
 
 
-def graph(rows: int = 9, cols: int = 41, x_max: float = 9.0) -> None:
-    """Допзадание: график y = x / 3 в первой четверти (9 строк в высоту)."""
+def graph(rows: int = 10, x_max: float = 9.0) -> None:
+    """Допзадание: график y = x / 3 в первой четверти (линия из точек)."""
     print("График функции y = x / 3 (первая четверть)")
     print()
-    buffer = build_plot(rows, cols, x_max)
+    grid = build_plot(rows, x_max)       # сначала строим, потом печатаем
     y_max = x_max / 3
+    points = len(grid[0])
 
-    for index, row in enumerate(buffer):
-        y_value = y_max * (1 - index / (rows - 1))
-        print(f"{y_value:4.1f} " + "".join(row))
+    # печатаем строки сетки: подпись по оси Y, черта оси и клетки (по 2 знака)
+    for index, line in enumerate(grid):
+        y_value = y_max * (1 - index / (rows - 1))   # подпись по оси Y
+        print(f"{y_value:4.1f} |" + "".join(cell + " " for cell in line))
 
-    axis = [" "] * (cols + 5)
-    for tick in range(0, int(x_max) + 1, 3):
-        position = 5 + round(tick / x_max * (cols - 1))
-        for offset, symbol in enumerate(str(tick)):
+    print("     +" + "-" * (points * 2))  # ось X под сеткой
+
+    axis = [" "] * (6 + points * 2)       # строка подписей по оси X
+    for tick in range(0, int(x_max) + 1, 3):    # подписываем 0, 3, 6, 9
+        position = 6 + tick * 2           # позиция подписи под своим столбцом
+        for offset, symbol in enumerate(str(tick)):   # вписываем цифры
             axis[position + offset] = symbol
     print("".join(axis).rstrip())
 
 
 # --- точка входа ---------------------------------------------------------------
+# имя режима -> функция, которая его выполняет
 TASKS = {
     "flag": flag,
     "pattern": pattern,
@@ -274,10 +307,10 @@ TASKS = {
 
 
 def main(argv: list[str]) -> int:
-    enable_ansi()
-    mode = argv[1] if len(argv) > 1 else "all"
+    enable_ansi()                                  # включаем цвета в консоли
+    mode = argv[1] if len(argv) > 1 else "all"     # режим из аргумента командной строки
 
-    if mode == "all":
+    if mode == "all":                              # всё подряд, с паузами между пунктами
         flag()
         pause(1)
         pattern()
@@ -289,15 +322,15 @@ def main(argv: list[str]) -> int:
         animation()
         return 0
 
-    task = TASKS.get(mode)
-    if task is None:
+    task = TASKS.get(mode)                         # функция выбранного режима
+    if task is None:                               # неизвестный режим — подсказка
         print(__doc__)
         print("Доступные режимы:", ", ".join(TASKS), "или all")
         return 2
 
-    task()
+    task()                                         # выполняем один пункт
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main(sys.argv))               # запуск только при прямом вызове
